@@ -56,6 +56,13 @@ export async function renderSvelteComponent(
   // Use the processed source (with auto-generated names injected)
   const processedSource = componentInfo.processedSource;
 
+  // DEBUG: Log processed source to see if handler attributes were removed
+  console.log('[DBI-Svelte DEBUG] Processed source template section:');
+  const templateMatch = processedSource.match(/<components>[\s\S]*?<\/components>/);
+  if (templateMatch) {
+    console.log(templateMatch[0]);
+  }
+
   // Compile the Svelte component for SSR (Svelte 5)
   let compiled;
   try {
