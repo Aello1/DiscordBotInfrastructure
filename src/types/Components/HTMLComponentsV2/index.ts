@@ -388,20 +388,8 @@ export class DBIHTMLComponentsV2<TNamespace extends NamespaceEnums> extends DBIB
           // This ensures __asyncInteractionCalled__ flag is set when handler calls ctx.interaction.reply() etc.
           const result = handlerFn.call(this, handlerContext.wrappedCtx, ...handlerData.slice(1));
           
-          // If handler returns a Promise (async handler), we need to handle it specially
+          // If handler returns a Promise (async handler), await it before flushing render
           if (result && typeof result.then === 'function') {
-            // Async handler detected - defer the interaction if not already deferred
-            // This prevents "interaction already acknowledged" errors for long-running handlers
-            const interaction = ctx.interaction as any;
-            if (interaction && !interaction.deferred && !interaction.replied) {
-              try {
-                await interaction.deferUpdate();
-              } catch (e) {
-                // Ignore if defer fails (might already be deferred)
-              }
-            }
-            
-            // Now await the async handler
             await result;
           }
         } finally {
