@@ -228,6 +228,9 @@ ${nextLine ? `${lineNum + 1} | ${nextLine}` : ''}
   const inlineHandlers = new Map<string, string>();
   let inlineHandlerCounter = 0;
 
+  // Track handler attributes to remove from source (handler, onclick, onchange, etc.)
+  const attributesToRemove: Array<{ start: number; end: number }> = [];
+
   // Walk through HTML nodes to find event handlers
   walkSvelteAst(ast.html || ast.fragment, (node: any, walkContext: WalkContext) => {
     if (node.type === "Element" || node.type === "InlineComponent" || node.type === "RegularElement" || node.type === "Component") {
@@ -278,6 +281,11 @@ ${nextLine ? `${lineNum + 1} | ${nextLine}` : ''}
 
                 if (handlerName) {
                   modalInfo.onsubmitHandler = handlerName;
+                }
+
+                // Track this attribute for removal from source (onsubmit shouldn't be in HTML)
+                if (attr.start !== undefined && attr.end !== undefined) {
+                  attributesToRemove.push({ start: attr.start, end: attr.end });
                 }
                 break;
               }
@@ -363,6 +371,10 @@ ${nextLine ? `${lineNum + 1} | ${nextLine}` : ''}
             if (isInline && inlineCode) {
               inlineHandlers.set(handlerName, inlineCode);
             }
+            // Track this attribute for removal from source
+            if (attr.start !== undefined && attr.end !== undefined) {
+              attributesToRemove.push({ start: attr.start, end: attr.end });
+            }
             break;
           }
         }
@@ -428,12 +440,32 @@ ${nextLine ? `${lineNum + 1} | ${nextLine}` : ''}
     }
   });
 
-  // Inject auto-generated names into the source
-  // Sort by position descending so we don't mess up offsets
+  // Process source modifications:
+  // 1. Remove handler attributes (onclick, onchange, handler) - they shouldn't be in final HTML
+  // 2. Inject auto-generated names for elements that need them
+  // 
+  // We need to apply these in reverse position order to maintain correct offsets
   let processedSource = source;
-  const sortedElements = [...elementsNeedingNames].sort((a, b) => b.node.start - a.node.start);
 
-  for (const { node, name, eachContext } of sortedElements) {
+  // Collect all modifications with their positions
+  type SourceModification =
+    | { type: 'remove'; start: number; end: number; sortKey: number }
+    | { type: 'insert'; position: number; content: string; sortKey: number };
+
+  const modifications: SourceModification[] = [];
+
+  // Add attribute removals
+  for (const { start, end } of attributesToRemove) {
+    // Also remove any leading whitespace before the attribute
+    let actualStart = start;
+    while (actualStart > 0 && (source[actualStart - 1] === ' ' || source[actualStart - 1] === '\t')) {
+      actualStart--;
+    }
+    modifications.push({ type: 'remove', start: actualStart, end, sortKey: actualStart });
+  }
+
+  // Add name injections
+  for (const { node, name, eachContext } of elementsNeedingNames) {
     // Find the position right after the opening tag name
     // e.g., <button ...> -> insert after "button"
     const tagEnd = node.start + 1 + node.name.length; // +1 for '<'
@@ -465,7 +497,24 @@ ${nextLine ? `${lineNum + 1} | ${nextLine}` : ''}
       nameAttrValue = `"${name}"`;
     }
 
-    processedSource = processedSource.slice(0, tagEnd) + ` name=${nameAttrValue}` + processedSource.slice(tagEnd);
+    modifications.push({ type: 'insert', position: tagEnd, content: ` name=${nameAttrValue}`, sortKey: tagEnd });
+  }
+
+  // Sort by position descending so we don't mess up offsets
+  // For same position, insertions should come before removals
+  modifications.sort((a, b) => {
+    if (b.sortKey !== a.sortKey) return b.sortKey - a.sortKey;
+    // Same position: insert before remove (so remove accounts for inserted content if needed)
+    return a.type === 'insert' ? -1 : 1;
+  });
+
+  // Apply all modifications
+  for (const mod of modifications) {
+    if (mod.type === 'remove') {
+      processedSource = processedSource.slice(0, mod.start) + processedSource.slice(mod.end);
+    } else {
+      processedSource = processedSource.slice(0, mod.position) + mod.content + processedSource.slice(mod.position);
+    }
   }
 
   // Extract declared props from $props() destructuring
