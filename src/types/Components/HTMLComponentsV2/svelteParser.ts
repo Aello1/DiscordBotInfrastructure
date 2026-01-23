@@ -1160,7 +1160,14 @@ export function createHandlerContext(scriptContent: string, initialData: Record<
               
               // Store the promise resolver in component's pending modals map
               // This will be resolved when modal submit interaction is received
-              __component__._pendingModals.set(modal.customId, { resolve: wrappedResolve, reject: wrappedReject });
+              // Also store the original message reference for rerender after modal submit
+              var originalMessage = __ctx__.interaction.message;
+              __component__._pendingModals.set(modal.customId, { 
+                resolve: wrappedResolve, 
+                reject: wrappedReject,
+                originalMessage: originalMessage,
+                data: __data__
+              });
               
               // Set up timeout if enabled (timeout > 0)
               if (timeout > 0) {

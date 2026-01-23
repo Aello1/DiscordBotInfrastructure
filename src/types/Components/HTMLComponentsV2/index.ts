@@ -81,8 +81,13 @@ export class DBIHTMLComponentsV2<TNamespace extends NamespaceEnums> extends DBIB
   private _activeContexts: Map<string, any> = new Map();
 
   // Store pending modal promises for await showModal() support
-  // Key: modal customId, Value: { resolve, reject } functions
-  _pendingModals: Map<string, { resolve: (result: any) => void; reject: (error: any) => void }> = new Map();
+  // Key: modal customId, Value: { resolve, reject, originalMessage, data } 
+  _pendingModals: Map<string, {
+    resolve: (result: any) => void;
+    reject: (error: any) => void;
+    originalMessage?: any;
+    data?: any;
+  }> = new Map();
 
   // Track initialization promise
   private _initPromise: Promise<void> | null = null;
@@ -202,21 +207,44 @@ export class DBIHTMLComponentsV2<TNamespace extends NamespaceEnums> extends DBIB
     const pendingModal = this._pendingModals.get(pendingKey);
 
     if (pendingModal) {
+      // Get the original message that was stored when showModal was called
+      const originalMessage = pendingModal.originalMessage;
+      const storedData = pendingModal.data || currentState;
+
       // Create a rerender function that can update the original message after modal submit
       const component = this;
       const rerender = async () => {
         // Re-render the component with current data
-        const components = await component.toJSON({ data: currentState });
+        const components = await component.toJSON({ data: storedData });
 
-        // Try to get the original message from the modal interaction
-        // Modal interactions have a 'message' property pointing to the original message
-        const originalMessage = modalInteraction.message;
+        // For ephemeral messages, we need to use the modal interaction's editReply
+        // For non-ephemeral, we can use message.edit directly
+        try {
+          // First try using modal interaction's editReply (works for ephemeral)
+          if (modalInteraction.deferred || modalInteraction.replied) {
+            await modalInteraction.editReply({
+              components,
+              flags: ["IsComponentsV2"],
+            });
+            return;
+          }
+        } catch (err: any) {
+          // If editReply fails, fall back to message.edit
+          console.warn('[DBI-Svelte] editReply failed, trying message.edit:', err.message);
+        }
 
+        // Fall back to original message edit (non-ephemeral)
         if (originalMessage && originalMessage.edit) {
-          await originalMessage.edit({
-            components,
-            flags: ["IsComponentsV2"],
-          });
+          try {
+            await originalMessage.edit({
+              components,
+              flags: ["IsComponentsV2"],
+            });
+          } catch (err: any) {
+            console.warn('[DBI-Svelte] Failed to rerender after modal:', err.message || err);
+          }
+        } else {
+          console.warn('[DBI-Svelte] Cannot rerender: No valid method available');
         }
       };
 
