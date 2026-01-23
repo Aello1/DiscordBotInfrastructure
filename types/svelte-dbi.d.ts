@@ -268,6 +268,16 @@ declare global {
     interaction: import("discord.js").ModalSubmitInteraction;
     /** Full execution context */
     ctx: any;
+    /** 
+     * Re-render the original message after modal submit.
+     * Use this to update the UI after processing modal data.
+     * @example
+     * const { fields, interaction, rerender } = await showModal("my-modal");
+     * await interaction.deferUpdate();
+     * // ... process data ...
+     * await rerender(); // Updates the original message
+     */
+    rerender: () => Promise<void>;
   }
 
   /**

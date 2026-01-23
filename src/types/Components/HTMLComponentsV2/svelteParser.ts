@@ -444,77 +444,52 @@ ${nextLine ? `${lineNum + 1} | ${nextLine}` : ''}
   // 1. Remove handler attributes (onclick, onchange, handler) - they shouldn't be in final HTML
   // 2. Inject auto-generated names for elements that need them
   // 
-  // We need to apply these in reverse position order to maintain correct offsets
+  // We apply removals first, then insertions, adjusting positions as we go
   let processedSource = source;
 
-  // Collect all modifications with their positions
-  type SourceModification =
-    | { type: 'remove'; start: number; end: number; sortKey: number }
-    | { type: 'insert'; position: number; content: string; sortKey: number };
-
-  const modifications: SourceModification[] = [];
-
-  // Add attribute removals
-  for (const { start, end } of attributesToRemove) {
-    // Also remove any leading whitespace before the attribute
+  // First, apply all attribute removals (sorted by position descending)
+  // Don't eat leading whitespace - just remove the attribute itself
+  const sortedRemovals = [...attributesToRemove].sort((a, b) => b.start - a.start);
+  for (const { start, end } of sortedRemovals) {
+    // Remove one leading space if present (to avoid double spaces)
     let actualStart = start;
-    while (actualStart > 0 && (source[actualStart - 1] === ' ' || source[actualStart - 1] === '\t')) {
+    if (actualStart > 0 && source[actualStart - 1] === ' ') {
       actualStart--;
     }
-    modifications.push({ type: 'remove', start: actualStart, end, sortKey: actualStart });
+    processedSource = processedSource.slice(0, actualStart) + processedSource.slice(end);
   }
 
-  // Add name injections
+  // Now re-parse the modified source to get correct positions for name injections
+  // Instead of re-parsing, we'll calculate the offset adjustments
+  // But this is complex - simpler approach: just work with the modified source directly
+
+  // Since we removed attributes, we need to re-identify elements that need names
+  // The safest approach: use regex to find elements without name attributes and add them
+
+  // For elements that need names, find them in the processed source and inject names
   for (const { node, name, eachContext } of elementsNeedingNames) {
-    // Find the position right after the opening tag name
-    // e.g., <button ...> -> insert after "button"
-    const tagEnd = node.start + 1 + node.name.length; // +1 for '<'
+    const tagName = node.name.toLowerCase();
 
     let nameAttrValue: string;
-
     if (eachContext && eachContext.length > 0) {
-      // Inside {#each} - generate dynamic name expression using loop variables
-      // Build a unique key from all nested loop contexts
-      // Priority: item.id > item.name > index
       const keyParts: string[] = [name];
-
       for (let i = 0; i < eachContext.length; i++) {
         const ctx = eachContext[i];
-        // Use index variable if available, otherwise use a property from iter var
         if (ctx.indexVar) {
           keyParts.push(`\${${ctx.indexVar}}`);
         } else {
-          // Try common unique identifiers: id, name, key, value
-          // Using the iter var directly as fallback
           keyParts.push(`\${${ctx.iterVar}?.id ?? ${ctx.iterVar}?.name ?? ${ctx.iterVar}?.key ?? ${ctx.iterVar}?.value ?? JSON.stringify(${ctx.iterVar}).slice(0,20)}`);
         }
       }
-
-      // Use backtick template literal for dynamic name
       nameAttrValue = `{\`${keyParts.join('_')}\`}`;
     } else {
-      // Static name - use quotes
       nameAttrValue = `"${name}"`;
     }
 
-    modifications.push({ type: 'insert', position: tagEnd, content: ` name=${nameAttrValue}`, sortKey: tagEnd });
-  }
-
-  // Sort by position descending so we don't mess up offsets
-  // For same position, insertions should come before removals
-  modifications.sort((a, b) => {
-    if (b.sortKey !== a.sortKey) return b.sortKey - a.sortKey;
-    // Same position: insert before remove (so remove accounts for inserted content if needed)
-    return a.type === 'insert' ? -1 : 1;
-  });
-
-  // Apply all modifications
-  for (const mod of modifications) {
-    if (mod.type === 'remove') {
-      processedSource = processedSource.slice(0, mod.start) + processedSource.slice(mod.end);
-    } else {
-      processedSource = processedSource.slice(0, mod.position) + mod.content + processedSource.slice(mod.position);
-    }
+    // Find this element in the processed source and add name attribute
+    // Match the tag without a name attribute
+    const tagRegex = new RegExp(`(<${tagName})(?![^>]*\\bname[=\\s])([^>]*>)`, 'i');
+    processedSource = processedSource.replace(tagRegex, `$1 name=${nameAttrValue}$2`);
   }
 
   // Extract declared props from $props() destructuring

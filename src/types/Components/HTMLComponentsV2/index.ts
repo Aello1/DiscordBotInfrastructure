@@ -202,11 +202,30 @@ export class DBIHTMLComponentsV2<TNamespace extends NamespaceEnums> extends DBIB
     const pendingModal = this._pendingModals.get(pendingKey);
 
     if (pendingModal) {
-      // Resolve the promise with fields and interaction
+      // Create a rerender function that can update the original message after modal submit
+      const component = this;
+      const rerender = async () => {
+        // Re-render the component with current data
+        const components = await component.toJSON({ data: currentState });
+
+        // Try to get the original message from the modal interaction
+        // Modal interactions have a 'message' property pointing to the original message
+        const originalMessage = modalInteraction.message;
+
+        if (originalMessage && originalMessage.edit) {
+          await originalMessage.edit({
+            components,
+            flags: ["IsComponentsV2"],
+          });
+        }
+      };
+
+      // Resolve the promise with fields, interaction, ctx, and rerender function
       pendingModal.resolve({
         fields,
         interaction: modalInteraction,
-        ctx: ctx
+        ctx: ctx,
+        rerender
       });
       this._pendingModals.delete(pendingKey);
     }
