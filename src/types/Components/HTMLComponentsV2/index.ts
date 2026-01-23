@@ -176,7 +176,7 @@ export class DBIHTMLComponentsV2<TNamespace extends NamespaceEnums> extends DBIB
         }
 
         if (handlerInfo) {
-          this._executeElementHandler(ctx, handlerInfo, handlerData);
+          await this._executeElementHandler(ctx, handlerInfo, handlerData);
         }
       }
     }
@@ -311,7 +311,7 @@ export class DBIHTMLComponentsV2<TNamespace extends NamespaceEnums> extends DBIB
   /**
    * Execute an element handler (button, select, etc.)
    */
-  private _executeElementHandler(
+  private async _executeElementHandler(
     ctx: IDBIHTMLComponentsV2ExecuteCtx<TNamespace>,
     handlerInfo: any,
     handlerData: any[]
@@ -386,7 +386,24 @@ export class DBIHTMLComponentsV2<TNamespace extends NamespaceEnums> extends DBIB
           // Bind 'this' to the DBIHTMLComponentsV2 instance so handlers can use this.toJSON()
           // Pass wrappedCtx so handlers use the proxy-wrapped ctx that tracks interaction calls
           // This ensures __asyncInteractionCalled__ flag is set when handler calls ctx.interaction.reply() etc.
-          handlerFn.call(this, handlerContext.wrappedCtx, ...handlerData.slice(1));
+          const result = handlerFn.call(this, handlerContext.wrappedCtx, ...handlerData.slice(1));
+          
+          // If handler returns a Promise (async handler), we need to handle it specially
+          if (result && typeof result.then === 'function') {
+            // Async handler detected - defer the interaction if not already deferred
+            // This prevents "interaction already acknowledged" errors for long-running handlers
+            const interaction = ctx.interaction as any;
+            if (interaction && !interaction.deferred && !interaction.replied) {
+              try {
+                await interaction.deferUpdate();
+              } catch (e) {
+                // Ignore if defer fails (might already be deferred)
+              }
+            }
+            
+            // Now await the async handler
+            await result;
+          }
         } finally {
           // Always reset handler execution flag
           handlerContext.setInHandler(false);
