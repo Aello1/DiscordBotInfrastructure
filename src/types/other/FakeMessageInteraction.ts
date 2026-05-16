@@ -39,6 +39,7 @@ export class FakeMessageInteraction /* implements ChatInputCommandInteraction */
   dbiChatInput: TDBIInteractions<NamespaceEnums>;
   dbiChatInputOptions: any[];
   fake: boolean = true;
+  commandMessage: Message;
   _hoistedOptions: any;
   _initialized: boolean = false;
   _lastAction: string | undefined;
@@ -70,6 +71,7 @@ export class FakeMessageInteraction /* implements ChatInputCommandInteraction */
     this.fullCommandName = chatInput.name;
     this.dbiChatInput = chatInput;
     this.dbiChatInputOptions = chatInput.options ? chatInput.options.map(i => ({ ...i })) : [];
+    this.commandMessage = message;
 
     {
       const argContent = message.content.slice(usedPrefix.length + commandName.length).replace(/ +/, " ").trim();
